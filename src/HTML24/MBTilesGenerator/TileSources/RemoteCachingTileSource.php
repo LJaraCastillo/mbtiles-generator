@@ -54,11 +54,17 @@ class RemoteCachingTileSource implements TileSourceInterface
     protected $format;
 
     /**
+     * Set if the tiles are osm or tsm
+     * @var bool
+     */
+    protected $osm;
+
+    /**
      * @param string $url
      * @param string[] $subDomains
      * @param string $temporary_folder
      */
-    public function __construct($url, $subDomains = null, $temporary_folder = null)
+    public function __construct($url, $subDomains = null,  $osm = true, $temporary_folder = null)
     {
         if ($temporary_folder === null) {
             $temporary_folder = sys_get_temp_dir();
@@ -84,6 +90,7 @@ class RemoteCachingTileSource implements TileSourceInterface
         } else {
             $this->format = 'jpg';
         }
+        $this->osm = $osm;
     }
 
     /**
@@ -101,6 +108,22 @@ class RemoteCachingTileSource implements TileSourceInterface
     public function getAttribution()
     {
         return (string)$this->attribution;
+    }
+
+    /**
+     * @param bool $osm
+     */
+    public function setOsm($osm)
+    {
+        $this->osm = $osm;
+    }
+
+    /**
+     * @return string
+     */
+    public function getOsm()
+    {
+        return $this->osm;
     }
 
     /**
@@ -228,7 +251,6 @@ class RemoteCachingTileSource implements TileSourceInterface
 
             return;
         }
-
         // The tile was not in the cache, add a queue item
         $this->queue[] = array(
             'url' => $this->tileUrl($tile),
@@ -256,8 +278,11 @@ class RemoteCachingTileSource implements TileSourceInterface
         $url = $this->domains[array_rand($this->domains)];
         $url = str_replace('{z}', $tile->z, $url);
         $url = str_replace('{x}', $tile->x, $url);
-        $url = str_replace('{y}', Calculator::flipYTmsToOsm($tile->y, $tile->z), $url);
-
+        $y = $tile->y;
+        if ($this->osm == false)
+            $y = Calculator::flipYTmsToOsm($tile->y, $tile->z);
+        $url = str_replace('{y}', $y, $url);
+        error_log($url, 0);
         return $url;
     }
 
@@ -269,7 +294,6 @@ class RemoteCachingTileSource implements TileSourceInterface
     protected function newCurlHandle($url)
     {
         $ch = curl_init();
-
         curl_setopt_array(
             $ch,
             array(
@@ -342,13 +366,12 @@ class RemoteCachingTileSource implements TileSourceInterface
      * @param string $format
      * @throws
      */
-    public function setFormat($format) {
+    public function setFormat($format)
+    {
         if ($format === 'jpg' || $format === 'png') {
             $this->format = $format;
         } else {
             throw new \Exception('Unknown format ' . $format . ' supplied');
         }
     }
-
-
 }

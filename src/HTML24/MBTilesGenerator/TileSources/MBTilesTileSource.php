@@ -142,4 +142,13 @@ class MBTilesTileSource implements TileSourceInterface
         }
     }
 
+    /**
+     * Return if osm or tsm
+     *
+     * @return string
+     */
+    public function getOsm()
+    {
+        return true;
+    }
 }

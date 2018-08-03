@@ -34,6 +34,12 @@ class MBTilesGenerator
     protected $maxZoom = 18;
 
     /**
+     * The zoom we are aiming for
+     * @var int
+     */
+    protected $minZoom = 0;
+
+    /**
      * The last actual zoom accomplished
      * @var int
      */
@@ -46,6 +52,9 @@ class MBTilesGenerator
      * @var int
      */
     protected $allowedFail = 5;
+
+
+    protected $osm = true;
 
     /**
      * @param TileSourceInterface $tileSource
@@ -68,7 +77,8 @@ class MBTilesGenerator
     public function generate(BoundingBox $boundingBox, $destination, $name = 'mbtiles-generator')
     {
         if (file_exists($destination)) {
-            throw new \Exception('Destination file already exists');
+            unlink($destination);
+            //throw new \Exception('Destination file already exists');
         }
         $tiles = $this->generateTileList($boundingBox);
 
@@ -89,15 +99,35 @@ class MBTilesGenerator
      * Set maximum zoom on this instance, defaults to 18.
      * @param int $zoom
      */
-    public function setMaxZoom($zoom) {
+    public function setMaxZoom($zoom)
+    {
         $this->maxZoom = $zoom;
+    }
+
+    /**
+     * Set maximum zoom on this instance, defaults to 18.
+     * @param int $zoom
+     */
+    public function setMinZoom($zoom)
+    {
+        $this->minZoom = $zoom;
+    }
+
+    /**
+     * Set maximum zoom on this instance, defaults to 18.
+     * @param int $zoom
+     */
+    public function setOsm($osm)
+    {
+        $this->osm = $osm;
     }
 
     /**
      * Sets the allowed failures
      * @param $allowedFail
      */
-    public function setAllowedFail($allowedFail) {
+    public function setAllowedFail($allowedFail)
+    {
         $this->allowedFail = $allowedFail;
     }
 
@@ -105,7 +135,8 @@ class MBTilesGenerator
      * Returns the effective zoom we accomplished on last run.
      * @return int
      */
-    public function getEffectiveZoom() {
+    public function getEffectiveZoom()
+    {
         return $this->effectiveZoom;
     }
 
@@ -160,17 +191,20 @@ class MBTilesGenerator
     protected function generateTileList(BoundingBox $boundingBox)
     {
         $tiles = array();
-        for ($i = 0; $i <= $this->maxZoom; $i++) {
-            $zoom_tiles = $this->generateTileListForZoom($boundingBox, $i);
-            if (count($tiles) + count($zoom_tiles) < $this->tileLimit) {
-                $tiles = array_merge($tiles, $zoom_tiles);
-                $this->effectiveZoom = $i;
-            } else {
-                // We got to many tiles, so no more zoom levels.
-                break;
+        if ($this->minZoom <= $this->maxZoom) {
+            for ($i = $this->minZoom; $i <= $this->maxZoom; $i++) {
+                $zoom_tiles = $this->generateTileListForZoom($boundingBox, $i);
+                if (count($tiles) + count($zoom_tiles) < $this->tileLimit) {
+                    $tiles = array_merge($tiles, $zoom_tiles);
+                    $this->effectiveZoom = $i;
+                } else {
+                    // We got to many tiles, so no more zoom levels.
+                    break;
+                }
             }
+        } else {
+            throw new \Exception('MinZoom should be less or equals to MaxZoom');
         }
-
         return $tiles;
     }
 
@@ -187,19 +221,20 @@ class MBTilesGenerator
             $boundingBox->getBottom(),
             $zoom
         );
-
         $end_tile = $this->coordinatesToTile(
             $boundingBox->getRight(),
             $boundingBox->getTop(),
             $zoom
         );
-
         for ($x = $start_tile->x; $x <= $end_tile->x; $x++) {
             for ($y = $start_tile->y; $y <= $end_tile->y; $y++) {
-                $tiles[] = new Tile($x, $y, $zoom);
+                $correctedY= $y;
+                if ($this->tileSource->getOsm()) {
+                    $correctedY = Calculator::flipYTmsToOsm($y, $zoom);
+                }
+                $tiles[] = new Tile($x, $correctedY, $zoom);
             }
         }
-
         return $tiles;
     }
 
@@ -215,7 +250,6 @@ class MBTilesGenerator
         $tile->z = $zoom;
         $tile->x = Calculator::longitudeToX($longitude, $zoom);
         $tile->y = Calculator::latitudeToY($latitude, $zoom);
-
         return $tile;
     }
 }

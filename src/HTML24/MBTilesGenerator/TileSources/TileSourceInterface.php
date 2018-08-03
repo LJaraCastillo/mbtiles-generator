@@ -39,9 +39,15 @@ interface TileSourceInterface
     public function getAttribution();
 
     /**
+     * Return if osm or tsm
+     *
+     * @return string
+     */
+    public function getOsm();
+    /**
      * Should return the format of the tiles, either 'jpg' or 'png'
      *
      * @return string
      */
     public function getFormat();
-} 
+}
