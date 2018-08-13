@@ -9,20 +9,17 @@ namespace HTML24\MBTilesGenerator\Model;
 class BoundingBox
 {
     /**
-     * Latitude of top
-     * @var float
-     */
-    protected $top;
-    /**
      * Longitude of left
      * @var float
      */
     protected $left;
+
     /**
      * Latitude of bottom
      * @var float
      */
     protected $bottom;
+
     /**
      * Longitude of right
      * @var float
@@ -30,22 +27,24 @@ class BoundingBox
     protected $right;
 
     /**
-     * @param string $bounds as: "left, bottom, right, top"
-     *
-     * @throws \Exception
+     * Latitude of top
+     * @var float
      */
-    public function __construct($bounds = null)
+    protected $top;
+
+    /**
+     * BoundingBox constructor.
+     * @param float $left
+     * @param float $bottom
+     * @param float $right
+     * @param float $top
+     */
+    public function __construct($left, $bottom, $right, $top)
     {
-        if ($bounds !== null) {
-            $coordinates = explode(',', $bounds);
-            if (count($coordinates) !== 4) {
-                throw new \Exception('Invalid $bounds input');
-            }
-            $this->left = floatval($coordinates[0]);
-            $this->bottom = floatval($coordinates[1]);
-            $this->right = floatval($coordinates[2]);
-            $this->top = floatval($coordinates[3]);
-        }
+        $this->left = $left;
+        $this->bottom = $bottom;
+        $this->right = $right;
+        $this->top = $top;
     }
 
     /**

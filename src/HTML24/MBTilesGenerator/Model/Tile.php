@@ -30,5 +30,28 @@ class Tile
         $this->z = $z;
     }
 
+    /**
+     * @return int
+     */
+    public function getX()
+    {
+        return $this->x;
+    }
+
+    /**
+     * @return int
+     */
+    public function getY()
+    {
+        return $this->y;
+    }
+
+    /**
+     * @return int
+     */
+    public function getZ()
+    {
+        return $this->z;
+    }
 
 } 

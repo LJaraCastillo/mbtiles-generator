@@ -9,7 +9,7 @@ namespace HTML24\MBTilesGenerator\TileSources;
 use HTML24\MBTilesGenerator\Exception\TileNotAvailableException;
 use HTML24\MBTilesGenerator\Model\Tile;
 
-class MBTilesTileSource implements TileSourceInterface
+class MBTilesTileSource extends TileSourceInterface
 {
 
     /**

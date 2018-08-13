@@ -9,7 +9,7 @@ namespace HTML24\MBTilesGenerator\TileSources;
 use HTML24\MBTilesGenerator\Exception\TileNotAvailableException;
 use HTML24\MBTilesGenerator\Model\Tile;
 
-interface TileSourceInterface
+abstract class TileSourceInterface
 {
 
     /**
@@ -19,7 +19,7 @@ interface TileSourceInterface
      * @param Tile[] $tiles
      * @return void
      */
-    public function cache($tiles);
+    abstract public function cache($tiles);
 
     /**
      * For every tile needed, this function will be called
@@ -29,25 +29,25 @@ interface TileSourceInterface
      * @throws TileNotAvailableException
      * @return string Blob of this image
      */
-    public function getTile(Tile $tile);
+    abstract public function getTile(Tile $tile);
 
     /**
      * Return the attribution text as HTML/text
      *
      * @return string
      */
-    public function getAttribution();
+    abstract public function getAttribution();
 
     /**
      * Return if osm or tsm
      *
      * @return string
      */
-    public function getOsm();
+    abstract public function getOsm();
     /**
      * Should return the format of the tiles, either 'jpg' or 'png'
      *
      * @return string
      */
-    public function getFormat();
+    abstract public function getFormat();
 }

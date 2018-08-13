@@ -7,10 +7,14 @@ namespace HTML24\MBTilesGenerator;
 
 use HTML24\MBTilesGenerator\Core\MBTileFile;
 use HTML24\MBTilesGenerator\Exception\TileNotAvailableException;
+use HTML24\MBTilesGenerator\TileSources\BingMapsTileSource;
+use HTML24\MBTilesGenerator\TileSources\RemoteCachingTileSource;
 use HTML24\MBTilesGenerator\TileSources\TileSourceInterface;
 use HTML24\MBTilesGenerator\Model\BoundingBox;
 use HTML24\MBTilesGenerator\Util\Calculator;
 use HTML24\MBTilesGenerator\Model\Tile;
+use HTML24\MBTilesGenerator\Model\LatLng;
+use HTML24\MBTilesGenerator\Util\GlobalMercator;
 
 class MBTilesGenerator
 {
@@ -54,7 +58,7 @@ class MBTilesGenerator
     protected $allowedFail = 5;
 
 
-    protected $osm = true;
+    protected $osm = false;
 
     /**
      * @param TileSourceInterface $tileSource
@@ -71,8 +75,8 @@ class MBTilesGenerator
      * @param string $destination File destination to write the mbtiles file to
      * @param string $name
      *
-     * @throws
-     * @return bool
+     * @return void
+     * @throws \Exception
      */
     public function generate(BoundingBox $boundingBox, $destination, $name = 'mbtiles-generator')
     {
@@ -82,17 +86,21 @@ class MBTilesGenerator
         }
         $tiles = $this->generateTileList($boundingBox);
 
-        $this->tileSource->cache($tiles);
-
+        if ($this->tileSource instanceof RemoteCachingTileSource) {
+            $this->tileSource->cache($tiles);
+        } else if ($this->tileSource instanceof BingMapsTileSource) {
+            $locations = $this->generateLocationList($boundingBox);
+            $this->tileSource->prepareTiles($tiles, $locations);
+        }
+        error_log("Constructing *.mbtiles file");
         // Start constructing our file
         $mbtiles = new MBTileFile($destination);
-
+        error_log("Writing metadata on database");
         // Set the required meta data
         $this->addMetaDataToDB($mbtiles, $boundingBox, $name);
-
+        error_log("Storing tiles in database");
         // Add tiles to the database
         $this->addTilesToDB($mbtiles, $tiles);
-
     }
 
     /**
@@ -114,8 +122,8 @@ class MBTilesGenerator
     }
 
     /**
-     * Set maximum zoom on this instance, defaults to 18.
-     * @param int $zoom
+     * Set if is using TSM or OSM mercator for the tiles
+     * @param $osm
      */
     public function setOsm($osm)
     {
@@ -180,13 +188,14 @@ class MBTilesGenerator
         $mbtiles->addMeta('attribution', $this->tileSource->getAttribution());
 
         $mbtiles->addMeta('bounds', (string)$boundingBox);
-        $mbtiles->addMeta('minzoom', 0);
+        $mbtiles->addMeta('minzoom', $this->minZoom);
         $mbtiles->addMeta('maxzoom', $this->effectiveZoom);
     }
 
     /**
      * @param BoundingBox $boundingBox
      * @return Tile[]
+     * @throws \Exception
      */
     protected function generateTileList(BoundingBox $boundingBox)
     {
@@ -210,6 +219,30 @@ class MBTilesGenerator
 
     /**
      * @param BoundingBox $boundingBox
+     * @return LatLng[]
+     * @throws \Exception
+     */
+    protected function generateLocationList(BoundingBox $boundingBox)
+    {
+        $locations = array();
+        if ($this->minZoom <= $this->maxZoom) {
+            for ($zoom = $this->minZoom; $zoom <= $this->maxZoom; $zoom++) {
+                $zoom_locations = $this->generateLocationListForZoom($boundingBox, $zoom);
+                if (count($locations) + count($zoom_locations) < $this->tileLimit) {
+                    $locations = array_merge($locations, $zoom_locations);
+                } else {
+                    // We got to many tiles, so no more zoom levels.
+                    break;
+                }
+            }
+        } else {
+            throw new \Exception('MinZoom should be less or equals to MaxZoom');
+        }
+        return $locations;
+    }
+
+    /**
+     * @param BoundingBox $boundingBox
      * @param int $zoom
      * @return Tile[]
      */
@@ -228,7 +261,7 @@ class MBTilesGenerator
         );
         for ($x = $start_tile->x; $x <= $end_tile->x; $x++) {
             for ($y = $start_tile->y; $y <= $end_tile->y; $y++) {
-                $correctedY= $y;
+                $correctedY = $y;
                 if ($this->tileSource->getOsm()) {
                     $correctedY = Calculator::flipYTmsToOsm($y, $zoom);
                 }
@@ -236,6 +269,34 @@ class MBTilesGenerator
             }
         }
         return $tiles;
+    }
+
+    /**
+     * @param BoundingBox $boundingBox
+     * @param int $zoom
+     * @return LatLng[]
+     */
+    protected function generateLocationListForZoom(BoundingBox $boundingBox, $zoom)
+    {
+        $locations = array();
+        $start_tile = $this->coordinatesToTile(
+            $boundingBox->getLeft(),
+            $boundingBox->getBottom(),
+            $zoom
+        );
+        $end_tile = $this->coordinatesToTile(
+            $boundingBox->getRight(),
+            $boundingBox->getTop(),
+            $zoom
+        );
+        $globalMercator = new GlobalMercator();
+        for ($x = $start_tile->x; $x <= $end_tile->x; $x++) {
+            for ($y = $start_tile->y; $y <= $end_tile->y; $y++) {
+                $latLng = $globalMercator->TileToLatLng(new Tile($x, $y, $zoom));
+                $locations[] = $latLng;
+            }
+        }
+        return $locations;
     }
 
     /**

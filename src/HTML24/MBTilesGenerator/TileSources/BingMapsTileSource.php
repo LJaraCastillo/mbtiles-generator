@@ -8,15 +8,10 @@ namespace HTML24\MBTilesGenerator\TileSources;
 
 use HTML24\MBTilesGenerator\Exception\TileNotAvailableException;
 use HTML24\MBTilesGenerator\Model\Tile;
-use HTML24\MBTilesGenerator\Util\Calculator;
+use HTML24\MBTilesGenerator\Model\LatLng;
 
-class RemoteCachingTileSource extends TileSourceInterface
+class BingMapsTileSource extends TileSourceInterface
 {
-    /**
-     * @var array
-     */
-    protected $domains;
-
     /**
      * @var string
      */
@@ -30,6 +25,16 @@ class RemoteCachingTileSource extends TileSourceInterface
     /**
      * @var array
      */
+    protected $tilesJson = array();
+
+    /**
+     * @var array
+     */
+    protected $queueJson = array();
+
+    /**
+     * @var array
+     */
     protected $queue = array();
 
     /**
@@ -38,9 +43,23 @@ class RemoteCachingTileSource extends TileSourceInterface
     protected $active_requests = array();
 
     /**
+     * @var array
+     */
+    protected $active_json_requests = array();
+    /**
+     * @var string
+     */
+    protected $url;
+
+    /**
      * @var string
      */
     protected $attribution;
+
+    /**
+     * @var string
+     */
+    protected $apiKey;
 
     /**
      * @var int
@@ -60,38 +79,26 @@ class RemoteCachingTileSource extends TileSourceInterface
     protected $osm;
 
     /**
+     *
      * @param string $url
      * @param string[] $subDomains
-     * @param bool $osm
      * @param string $temporary_folder
      */
-    public function __construct($url, $subDomains = null,  $osm = true, $temporary_folder = null)
+    public function __construct($url, $temporary_folder = null, $folder_name)
     {
         if ($temporary_folder === null) {
             $temporary_folder = sys_get_temp_dir();
         }
-        $this->cacheDir = $temporary_folder . '/mbtiles-generator/' . preg_replace(
-                array('/\s/', '/\.[\.]+/', '/[^\w_\.\-]/'),
-                array('_', '.', '_'),
-                $url
-            );
+        $this->cacheDir = $temporary_folder . '/mbtiles-generator/' . $folder_name;
         $this->removeDirectory($this->cacheDir);
-        if ($subDomains) {
-            $this->domains = array();
-            foreach ($subDomains as $subDomain) {
-                $this->domains[] = str_replace('{s}', $subDomain, $url);
-            }
-        } else {
-            $this->domains = array($url);
-        }
-
+        $this->url = $url;
         // Attempt to figure out the format, automatically. Fallback to jpg.
         if (strtolower(substr($url, -3)) == 'png') {
             $this->format = 'png';
         } else {
             $this->format = 'jpg';
         }
-        $this->osm = $osm;
+        $this->osm = true;
     }
 
     function removeDirectory($path)
@@ -109,33 +116,34 @@ class RemoteCachingTileSource extends TileSourceInterface
      * Set the attribution for this tile source
      * @param string $attribution
      */
-    public function setAttribution($attribution)
+    public function setUrl($url)
     {
-        $this->attribution = (string)$attribution;
+        $this->url = (string)$url;
     }
 
     /**
      * @return string
      */
-    public function getAttribution()
+    public function getUrl()
     {
-        return (string)$this->attribution;
+        return (string)$this->url;
     }
 
     /**
-     * @param bool $osm
+     * Set the apiKey for this tile source
+     * @param string $apiKey
      */
-    public function setOsm($osm)
+    public function setApiKey($apiKey)
     {
-        $this->osm = $osm;
+        $this->apiKey = (string)$apiKey;
     }
 
     /**
      * @return string
      */
-    public function getOsm()
+    public function getApiKey()
     {
-        return $this->osm;
+        return (string)$this->apiKey;
     }
 
     /**
@@ -143,20 +151,22 @@ class RemoteCachingTileSource extends TileSourceInterface
      *
      * Use this to batch generate/download tiles.
      * @param Tile[] $tiles
+     * @param LatLng[] $locations
      * @return void
      */
-    public function cache($tiles)
+    public function prepareTiles($tiles, $locations)
     {
-        error_log("Preparing download");
         // Start CURL Multi handle
+        error_log("Preparing download");
         $this->curl_multi = curl_multi_init();
-
-        // Queue up downloads
-        foreach ($tiles as $tile) {
-            $this->queueTile($tile);
+        for ($i = 0; $i < count($tiles); $i++) {
+            $tile = $tiles[$i];
+            $location = $locations[$i];
+            $this->queueJSON($tile, $location);
         }
+        error_log("Downloading data from server!");
+        $this->downloadTilesJson();
         error_log("Downloading tiles from server!");
-        // Execute the download
         $this->downloadTiles();
     }
 
@@ -165,13 +175,13 @@ class RemoteCachingTileSource extends TileSourceInterface
      */
     protected function downloadTiles()
     {
-
         while (count($this->queue) > 0) {
             $this->waitForRequestsToDropBelow($this->maxRequests);
 
             $item = array_shift($this->queue);
 
             $ch = $this->newCurlHandle($item['url']);
+
             curl_multi_add_handle($this->curl_multi, $ch);
 
             $key = (int)$ch;
@@ -191,6 +201,39 @@ class RemoteCachingTileSource extends TileSourceInterface
         while (1) {
             $this->checkForCompletedRequests();
             if (count($this->active_requests) < $max) {
+                break;
+            }
+            usleep(10000);
+        }
+    }
+
+    protected function downloadTilesJson()
+    {
+        while (count($this->queueJson) > 0) {
+            $this->waitForRequestsToDropBelow($this->maxRequests);
+
+            $item = array_shift($this->queueJson);
+
+            $ch = $this->newCurlHandle($item['url']);
+
+            curl_multi_add_handle($this->curl_multi, $ch);
+
+            $key = (int)$ch;
+            $this->active_json_requests[$key] = $item;
+
+            $this->checkForGatteredJSON();
+        }
+        $this->waitForRequestsToDropBelow(1);
+    }
+
+    /**
+     * @param int $max
+     */
+    protected function waitForJSONRequestsToDropBelow($max)
+    {
+        while (1) {
+            $this->checkForGatteredJSON();
+            if (count($this->active_json_requests) < $max) {
                 break;
             }
             usleep(10000);
@@ -250,11 +293,83 @@ class RemoteCachingTileSource extends TileSourceInterface
         }
     }
 
+    protected function checkForGatteredJSON()
+    {
+        do {
+            $mrc = curl_multi_exec($this->curl_multi, $active);
+        } while ($mrc == CURLM_CALL_MULTI_PERFORM);
+
+        while ($active && $mrc == CURLM_OK) {
+            if (curl_multi_select($this->curl_multi) != -1) {
+                do {
+                    $mrc = curl_multi_exec($this->curl_multi, $active);
+                } while ($mrc == CURLM_CALL_MULTI_PERFORM);
+            } else {
+                return;
+            }
+        }
+
+        // Grab information about completed requests
+        while ($info = curl_multi_info_read($this->curl_multi)) {
+            $ch = $info['handle'];
+
+            $ch_array_key = (int)$ch;
+
+            if (!isset($this->active_json_requests[$ch_array_key])) {
+                die("Error - handle wasn't found in requests: '$ch' in " .
+                    print_r($this->active_json_requests, true));
+            }
+            $request = $this->active_json_requests[$ch_array_key];
+            $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+            if ($info['result'] !== CURLE_OK) {
+                //echo 'Error on tile: ' . $request['url'] . ' - ' . curl_error($ch) . "\n";
+            } else if ($status != 200) {
+                //echo 'Error on tile: ' . $request['url'] . ' - HTTP Status: ' . $status . "\n";
+            } else {
+                $result = curl_multi_getcontent($ch);
+                $json = json_decode($result);
+                $resources = $json->resourceSets;
+                $url = $resources[0]->resources[0]->imageUrl;
+                //error_log("Image URL = $url");
+                $tile = $request['tile'];
+                $this->queueTile($tile, $url);
+            }
+            unset($this->active_json_requests[$ch_array_key]);
+
+            curl_multi_remove_handle($this->curl_multi, $ch);
+        }
+    }
+
+    /**
+     * Adds a tile to the download queue
+     * @param Tile $tile
+     * @param LatLng $location
+     */
+    protected function queueJSON(Tile $tile, LatLng $location)
+    {
+        $tile_destination = $this->tileDestination($tile);
+
+        // Check if we already have the tile in cache
+        if (file_exists($tile_destination)) {
+            //echo 'Cache hit for tile: ' . $tile->z . '/' . $tile->x . '/' . $tile->y . "\n";
+
+            return;
+        }
+        // The tile was not in the cache, add a queue item
+        $this->queueJson[] = array(
+            'url' => $this->tileUrl($location),
+            'tile' => $tile,
+            'location' => $location,
+        );
+        //echo 'Cache miss for tile: ' . $tile->z . '/' . $tile->x . '/' . $tile->y . "\n";
+    }
+
     /**
      * Adds a tile to the download queue
      * @param Tile $tile
      */
-    protected function queueTile(Tile $tile)
+    protected function queueTile(Tile $tile, $url)
     {
         $tile_destination = $this->tileDestination($tile);
 
@@ -266,7 +381,7 @@ class RemoteCachingTileSource extends TileSourceInterface
         }
         // The tile was not in the cache, add a queue item
         $this->queue[] = array(
-            'url' => $this->tileUrl($tile),
+            'url' => $url,
             'destination' => $this->tileDestination($tile),
         );
 
@@ -283,18 +398,16 @@ class RemoteCachingTileSource extends TileSourceInterface
     }
 
     /**
-     * @param Tile $tile
+     * @param LatLng $location
      * @return string
      */
-    protected function tileUrl(Tile $tile)
+    protected function tileUrl(LatLng $location)
     {
-        $url = $this->domains[array_rand($this->domains)];
-        $url = str_replace('{z}', $tile->z, $url);
-        $url = str_replace('{x}', $tile->x, $url);
-        $y = $tile->y;
-        if (!$this->osm)
-            $y = Calculator::flipYTmsToOsm($tile->y, $tile->z);
-        $url = str_replace('{y}', $y, $url);
+        $center = $location->latitude . "," . $location->longitude;
+        $url = $this->url;
+        $url = str_replace('{zoom}', $location->z, $url);
+        $url = str_replace('{center}', $center, $url);
+        $url = str_replace('{api_key}', $this->apiKey, $url);
         //error_log($url, 0);
         return $url;
     }
@@ -386,5 +499,38 @@ class RemoteCachingTileSource extends TileSourceInterface
         } else {
             throw new \Exception('Unknown format ' . $format . ' supplied');
         }
+    }
+
+    /**
+     * This method will be called before actually requesting single tiles.
+     *
+     * Use this to batch generate/download tiles.
+     * @param Tile[] $tiles
+     * @return void
+     * @throws \Exception
+     */
+    public function cache($tiles)
+    {
+        throw new \Exception("Method not implemented!");
+    }
+
+    /**
+     * Return the attribution text as HTML/text
+     *
+     * @return string
+     */
+    public function getAttribution()
+    {
+        return "All data and imagery belongs to Microsoft.";
+    }
+
+    /**
+     * Return if osm or tsm
+     *
+     * @return string
+     */
+    public function getOsm()
+    {
+        return true;
     }
 }
