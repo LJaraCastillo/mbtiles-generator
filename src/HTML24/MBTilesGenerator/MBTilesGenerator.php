@@ -131,6 +131,22 @@ class MBTilesGenerator
     }
 
     /**
+     * @return int
+     */
+    public function getTileLimit()
+    {
+        return $this->tileLimit;
+    }
+
+    /**
+     * @param int $tileLimit
+     */
+    public function setTileLimit($tileLimit)
+    {
+        $this->tileLimit = $tileLimit;
+    }
+    
+    /**
      * Sets the allowed failures
      * @param $allowedFail
      */
