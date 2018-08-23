@@ -29,7 +29,7 @@ class MBTilesGenerator
      * the zoom will be stepped down, until we are within this limit.
      * @var int
      */
-    protected $tileLimit = 2000;
+    protected $tileLimit = 10000;
 
     /**
      * The zoom we are aiming for
@@ -80,6 +80,7 @@ class MBTilesGenerator
      */
     public function generate(BoundingBox $boundingBox, $destination, $name = 'mbtiles-generator')
     {
+        error_log("[" . date("H:i:s") . "]" . "Starting generator");
         if (file_exists($destination)) {
             unlink($destination);
             //throw new \Exception('Destination file already exists');
@@ -92,15 +93,31 @@ class MBTilesGenerator
             $locations = $this->generateLocationList($boundingBox);
             $this->tileSource->prepareTiles($tiles, $locations);
         }
-        error_log("Constructing *.mbtiles file");
+        error_log("[" . date("H:i:s") . "]" . "Constructing *.mbtiles file");
         // Start constructing our file
         $mbtiles = new MBTileFile($destination);
-        error_log("Writing metadata on database");
+        error_log("[" . date("H:i:s") . "]" . "Writing metadata on database");
         // Set the required meta data
         $this->addMetaDataToDB($mbtiles, $boundingBox, $name);
-        error_log("Storing tiles in database");
+        error_log("[" . date("H:i:s") . "]" . "Storing tiles in database");
         // Add tiles to the database
         $this->addTilesToDB($mbtiles, $tiles);
+    }
+
+    /**
+     * @return int
+     */
+    public function getTileLimit()
+    {
+        return $this->tileLimit;
+    }
+
+    /**
+     * @param int $tileLimit
+     */
+    public function setTileLimit($tileLimit)
+    {
+        $this->tileLimit = $tileLimit;
     }
 
     /**
@@ -130,22 +147,6 @@ class MBTilesGenerator
         $this->osm = $osm;
     }
 
-    /**
-     * @return int
-     */
-    public function getTileLimit()
-    {
-        return $this->tileLimit;
-    }
-
-    /**
-     * @param int $tileLimit
-     */
-    public function setTileLimit($tileLimit)
-    {
-        $this->tileLimit = $tileLimit;
-    }
-    
     /**
      * Sets the allowed failures
      * @param $allowedFail
