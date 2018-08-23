@@ -23,6 +23,10 @@ class BingMapsTileSource extends TileSourceInterface
     protected $curl_multi;
 
     /**
+     * @var resource
+     */
+    protected $curl_multi_json;
+    /**
      * @var array
      */
     protected $tilesJson = array();
@@ -79,7 +83,28 @@ class BingMapsTileSource extends TileSourceInterface
     protected $osm;
 
     /**
-     *
+     * total number of tiles to read
+     * @var int
+     */
+    protected $queueJsonCount;
+
+    /**
+     * index of json downloaded
+     * @var int
+     */
+    protected $jsonIndex = 0;
+    /**
+     * total number of tiles to download
+     * @var int
+     */
+    protected $queueCount;
+    /**
+     * index of tile downloaded
+     * @var int
+     */
+    protected $tileIndex = 0;
+
+    /**
      * @param string $url
      * @param string[] $subDomains
      * @param string $temporary_folder
@@ -157,16 +182,19 @@ class BingMapsTileSource extends TileSourceInterface
     public function prepareTiles($tiles, $locations)
     {
         // Start CURL Multi handle
-        error_log("Preparing download");
+        error_log("[" . date("H:i:s") . "]" . "Preparing download");
         $this->curl_multi = curl_multi_init();
+        $this->curl_multi_json = curl_multi_init();
         for ($i = 0; $i < count($tiles); $i++) {
             $tile = $tiles[$i];
             $location = $locations[$i];
             $this->queueJSON($tile, $location);
         }
-        error_log("Downloading data from server!");
+        $this->queueJsonCount = count($this->queueJson);
+        error_log("[" . date("H:i:s") . "]" . "Downloading data from server! [Total = " . $this->queueJsonCount . "]");
         $this->downloadTilesJson();
-        error_log("Downloading tiles from server!");
+        $this->queueCount = count($this->queue);
+        error_log("[" . date("H:i:s") . "]" . "Downloading tiles from server! [Total = " . $this->queueCount . "]");
         $this->downloadTiles();
     }
 
@@ -210,20 +238,20 @@ class BingMapsTileSource extends TileSourceInterface
     protected function downloadTilesJson()
     {
         while (count($this->queueJson) > 0) {
-            $this->waitForRequestsToDropBelow($this->maxRequests);
+            $this->waitForJSONRequestsToDropBelow($this->maxRequests);
 
             $item = array_shift($this->queueJson);
 
             $ch = $this->newCurlHandle($item['url']);
 
-            curl_multi_add_handle($this->curl_multi, $ch);
+            curl_multi_add_handle($this->curl_multi_json, $ch);
 
             $key = (int)$ch;
             $this->active_json_requests[$key] = $item;
 
             $this->checkForGatteredJSON();
         }
-        $this->waitForRequestsToDropBelow(1);
+        $this->waitForJSONRequestsToDropBelow(1);
     }
 
     /**
@@ -284,9 +312,10 @@ class BingMapsTileSource extends TileSourceInterface
 
                 // Write content to destination
                 file_put_contents($request['destination'], curl_multi_getcontent($ch));
+                $this->tileIndex++;
+                $percentage = ($this->tileIndex / $this->queueCount) * 100;
+                error_log("[" . date("H:i:s") . "]" . "Downloading Tiles " . number_format($percentage, 2) . "% (" . $this->tileIndex . "/" . $this->queueCount . ")");
             }
-
-
             unset($this->active_requests[$ch_array_key]);
 
             curl_multi_remove_handle($this->curl_multi, $ch);
@@ -296,13 +325,13 @@ class BingMapsTileSource extends TileSourceInterface
     protected function checkForGatteredJSON()
     {
         do {
-            $mrc = curl_multi_exec($this->curl_multi, $active);
+            $mrc = curl_multi_exec($this->curl_multi_json, $active);
         } while ($mrc == CURLM_CALL_MULTI_PERFORM);
 
         while ($active && $mrc == CURLM_OK) {
-            if (curl_multi_select($this->curl_multi) != -1) {
+            if (curl_multi_select($this->curl_multi_json) != -1) {
                 do {
-                    $mrc = curl_multi_exec($this->curl_multi, $active);
+                    $mrc = curl_multi_exec($this->curl_multi_json, $active);
                 } while ($mrc == CURLM_CALL_MULTI_PERFORM);
             } else {
                 return;
@@ -310,7 +339,7 @@ class BingMapsTileSource extends TileSourceInterface
         }
 
         // Grab information about completed requests
-        while ($info = curl_multi_info_read($this->curl_multi)) {
+        while ($info = curl_multi_info_read($this->curl_multi_json)) {
             $ch = $info['handle'];
 
             $ch_array_key = (int)$ch;
@@ -331,13 +360,15 @@ class BingMapsTileSource extends TileSourceInterface
                 $json = json_decode($result);
                 $resources = $json->resourceSets;
                 $url = $resources[0]->resources[0]->imageUrl;
-                //error_log("Image URL = $url");
+                $this->jsonIndex++;
+                $percentage = ($this->jsonIndex / $this->queueJsonCount) * 100;
+                error_log("[" . date("H:i:s") . "]" . "Reading Tile Info " . number_format($percentage, 2) . "% (" . $this->jsonIndex . "/" . $this->queueJsonCount . ")");
                 $tile = $request['tile'];
                 $this->queueTile($tile, $url);
             }
             unset($this->active_json_requests[$ch_array_key]);
 
-            curl_multi_remove_handle($this->curl_multi, $ch);
+            curl_multi_remove_handle($this->curl_multi_json, $ch);
         }
     }
 
@@ -408,7 +439,6 @@ class BingMapsTileSource extends TileSourceInterface
         $url = str_replace('{zoom}', $location->z, $url);
         $url = str_replace('{center}', $center, $url);
         $url = str_replace('{api_key}', $this->apiKey, $url);
-        //error_log($url, 0);
         return $url;
     }
 
